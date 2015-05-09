@@ -1,0 +1,215 @@
+---
+title: "kdd"
+output: html_document
+---
+
+#KDD Cup Porject
+
+Zhiyue Liu (zhiyuel)
+
+## Introduction
+During the last decade, the attack in the network has attracted the attention of many researches. To prevent these unfriendly visitors, we need to build a network intrusion detector, which can distinguish the ''bad'' connections, and ''good'' connections.
+
+## Dataset
+This database(KDD Cup 1999 Data) contains a standard set of data to be audited, which includes a wide variety of intrusions simulated in a military network environment.
+
+## Methods
+- Implemented in R
+  1.Do data preprocessing and feature selection 
+  2.Build different models by using 10% training data;
+  3. Compare the results of these models, and do error analysis;
+  4. Select the algorithm with the highest performance;
+  5. Implemented in R-MapReduce
+
+### Loading and preprocessing the 10% training data
+```{r}
+
+trainfile="KDDTrain+.csv"
+testfile="KDDTest+.csv"
+preprocess=function(trainfile){
+# Load the data 
+  train_raw <- read.csv(trainfile, stringsAsFactors = FALSE)
+  # Process the data
+  colnames <- read.table("kddcup.names", skip = 1, sep = ":")
+  names(train_raw) <- colnames$V1
+  d <- dim(train_raw)
+  names(train_raw)[d[2]-1] <- "label"
+  train_raw<-train_raw[,1:d[2]-1]
+  return(train_raw)
+}
+train_raw=preprocess(trainfile)
+test_raw=preprocess(testfile)
+```
+
+#clear up
+```{r}
+train_raw=t(apply(as.matrix(train_raw),1,labelTransfer))
+test_raw=t(apply(as.matrix(test_raw),1,labelTransfer))
+train_raw=as.data.frame(train_raw)
+test_raw=as.data.frame(test_raw)
+
+labelTransfer=function(x){
+    label = x[42]
+    type = 'normal'
+    if(label=='smurf'||label=='back'||label=='land'
+               ||label=='neptune'||label=='pod'||label=='teardrop'){
+       type = 'dos'
+      }else if(label=='satan'||label=='ipsweep'||label=='nmap'
+               ||label=='portsweep'){
+        type = 'probe'
+      }else if(label=='guess_passwd'||label=='ftp_write'||label=='imap'||label=='phf'||label=='multihop'||label=='warezmaster'||label=='warezclient'||label=='spy'){
+        type = 'r2l'
+      }else if(label=='buffer_overflow'||label=='loadmodule'||label=='perl'||label=='rootkit'){
+        type = 'u2r'
+      }
+    ####for test data
+      else if(label=='processtable.'||label=='mailbomb.'||label=='apache2.'||label=='upstorm.'){
+          type='dos'
+        }else if(label=='sqlattack.'||label=='ps.'||label=='xterm.'){
+         type='u2r'
+        }else if(label=='snmpgetattack.'||label=='snmpguess.'||label=='named.'||label=='sendemail.'||label=='httptunnel.'||label=='worm.'||label=='xlock.'||label=='xsnoop.'){
+         type='r2l'
+        }else if(label=='saint.'||label=='mscan.'){
+          type='probe'
+        }
+    x[42] = type
+    return(x)
+}
+#points <- uni_test[,42]
+xrange <- length(as.factor(uni_test[,42]))
+x <- sample(c(1,2,3,4,5), xrange, replace = TRUE)
+sum(x == as.numeric(points))/xrange
+uni_train=unique(train_raw)
+uni_test=unique(test_raw)
+write.table(uni_train, file ="train5Label.csv",row.names=FALSE,sep = ",")
+write.table(uni_test, file ="test5Label.csv",row.names=FALSE,sep = ",")
+# Clean up near zero variance features
+nzvcol <- nearZeroVar(uni_ab_train)
+if(length(nzvcol) > 0) {
+training <- uni_ab_train[, -nzvcol]
+}
+```
+        
+# Observe the distribution of labels. 
+```{r}
+sum_label <- aggregate(rep(1, d[1]), 
+                       by = list(train_raw$label), 
+                       FUN = sum)
+names(sum_label) <- c("label", "count")
+barplot(beside = TRUE, log10(sum_label$count), 
+        names.arg = sum_label$label, ylim = c(0,6),
+        xlab = "Label", ylab = "log(Count)",
+        col = "Blue", main = "The distribution of labels")
+# Select the features 
+install.packages("caret",dependencies=TRUE);
+library(caret)
+# Process the feature with NA value.
+l <- train_raw$label
+sum(is.na(l))
+```
+
+### loading train and test data
+```{r}
+training <- read.csv('train5Label.csv', stringsAsFactors = FALSE)
+testing<-read.csv('test5Label.csv', stringsAsFactors = FALSE)
+testing$label <- as.factor(testing$label)
+#label into factor, classifiy, nominal
+training$label <- factor(training$label)
+d <- dim(training)
+```
+
+### Building the model by using the Naive Bayes.
+```{r, results = 'hide', echo = TRUE}
+library(e1071)
+# Build the model
+label_result = training[,d[2]]
+training_data = training[,1:(d[2]-1)]
+navie_bayes_tree_model = naiveBayes(as.factor(label_result)~.,
+                                    training_data)
+# Predict the testing
+testing_data = testing[, 1: (d[2]-1)]
+navie_bayes_pred = predict(navie_bayes_tree_model, testing_data)
+golden_answer = testing[, d[2]]
+navie_bayes_pred = factor(navie_bayes_pred, levels =levels(golden_answer))
+#confusion matrix
+confusion_table=table(navie_bayes_pred, golden_answer)
+# Get the accuracy
+NB_accuracy <- mean(golden_answer == navie_bayes_pred,na.rm = TRUE)
+
+```
+
+#decision tree
+```{r}
+num_train=training[,1]
+library(tree)
+dt_tree_model=tree(as.factor(label_result)~.,num_train)
+#plot(dt_tree_model)
+#text(dt_tree_model, pretty=0)
+tree_pred=predict(dt_tree_model, testing_data, type="class")
+tree_pred = factor(tree_pred, levels =levels(golden_answer))
+#confusion matrix
+confusion_table=table(tree_pred, golden_answer)
+# Get the accuracy
+DT_accuracy <- mean(golden_answer == tree_pred,na.rm = TRUE)
+```
+
+#prune descision tree
+#no difference after prune the tree using cross validation
+```{r}
+###cross validation to check where to stop pruning
+set.seed(2)
+cv_dt_tree=cv.tree(dt_tree_model, FUN=prune.misclass)
+# size, dev, k, method
+#where dev stands for the error rate
+#names(cv_tree)
+plot(cv_dt_tree$size, cv_dt_tree$dev, type="b")
+###prune the tree
+pruned_model=prune.misclass(dt_tree_model, best=6) # here 10 is the best observation from plot
+plot(pruned_model)
+text(pruned_model, pretty=0)
+#check how it's doing
+prune_tree_pred= predict(pruned_model, testing_data, type="class")
+prune_tree_pred = factor(prune_tree_pred, levels =levels(golden_answer))
+#confusion matrix
+confusion_table=table(prune_tree_pred, golden_answer)
+# Get the accuracy
+PRUNE_DT_accuracy <- mean(golden_answer == prune_tree_pred,na.rm = TRUE)
+#here the misclassification error is a little bit smaller
+```
+
+#randomForest
+```{r}
+install.packages('randomForest')
+library(randomForest)
+set.seed(415)
+rf_model<- randomForest(as.factor(label_result)~.,num_train, importance=TRUE, ntree=100)
+#varImpPlot(rf_model)
+num_train=training[,1]+training[,5:41]
+
+forest_pred=predict(rf_model, testing_data, type="class")
+forest_pred = factor(forest_pred, levels =levels(golden_answer))
+#confusion matrix
+confusion_table=table(forest_pred, golden_answer)
+# Get the accuracy
+F_accuracy <- mean(golden_answer == forest_pred,na.rm = TRUE)
+
+```
+
+#normalize
+```{r}
+train2cleaned <- read.csv("train5Label.csv", stringsAsFactors = FALSE)
+di=dim(train2cleaned)
+norm=function(data, dimension){
+   for(col in 1: (dimension[2]-1)){
+     max=max(data[, col])
+     min=min(data[, col])
+    if(col==2||col==3||col==4)
+       next
+    for(row in 1:dimension[1]){
+      data[row,col]=(data[row,col]-min)/(max-min)
+    }
+   }
+   return(data)
+ }
+train2cleaned=norm(train2cleaned, dimension)
+```
