@@ -1,0 +1,6 @@
+SELECT a.gplayer as player from (select g.player as gplayer, avg(score) as average from golfdata g GROUP BY g.player) a where a.average>70 and a.average<72;
+
+
+
+
+

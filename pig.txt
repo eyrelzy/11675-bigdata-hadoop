@@ -1,0 +1,10 @@
+a = LOAD 'golfdata' USING org.apache.hive.hcatalog.pig.HCatLoader();
+sub = FOREACH a GENERATE $0 as player, $1 as score;
+grp_data = GROUP sub BY (player);
+
+avg_data = FOREACH grp_data GENERATE group as playername, AVG(sub.score) as average;
+
+score_data = FILTER avg_data BY average > 70 and average < 72;
+d = FOREACH score_data GENERATE playername; 
+
+dump d;
